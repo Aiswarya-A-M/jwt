@@ -23,12 +23,6 @@ connection.connect((error) => {
   }
 });
 
-app.get("/", (req, res) => {
-  res.json({
-    message: "success",
-  });
-});
-
 app.post("/register", (req, res) => {
   try {
     const salt = bcrypt.genSaltSync(10);
@@ -40,31 +34,16 @@ app.post("/register", (req, res) => {
     const phoneNumber = req.body.phoneNumber;
     const checkingQuery = `SELECT email FROM registration WHERE email="${email}"`;
     connection.query(checkingQuery, (error, result) => {
-      if (result.length !== 0) {
-        return res.end("given mail id is already used");
+      if (result.length === 0) {
+        const sql = `INSERT INTO registration (fname,lname,email,password,phoneNumber) VALUES ("${fName}","${lName}","${email}","${password}","${phoneNumber}")`;
+        connection.query(sql, (error, result) => {
+          if (error) {
+            return console.log(error);
+          }
+        });
+        res.end("added to registration table");
       }
-    });
-    const sql = `INSERT INTO registration (fname,lname,email,password,phoneNumber) VALUES ("${fName}","${lName}","${email}","${password}","${phoneNumber}")`;
-    connection.query(sql, function (error, result) {
-      if (error) {
-        return console.log(error);
-      }
-      res.end("added to registration table");
-    });
-  } catch (error) {
-    console.log(error);
-  }
-});
-
-app.get("/user/:id", authenticateToken, (req, res) => {
-  try {
-    const id = req.params.id;
-    const sql = `SELECT * FROM registration WHERE id= ${id}`;
-    connection.query(sql, function (error, result) {
-      if (error) {
-        return console.log(error);
-      }
-      res.json(result);
+      return res.end("given mail id is already used");
     });
   } catch (error) {
     console.log(error);
@@ -76,30 +55,27 @@ app.post("/login", (req, res) => {
     const userName = req.body.email;
     const providedPassword = req.body.password;
     const sql = `SELECT id,password FROM registration WHERE email="${userName}"`;
-    connection.query(sql, function (error, result) {
+    connection.query(sql, (error, result) => {
       if (error) {
-        console.log("login query", error);
         return res.json({ message: "internal server error" });
       }
       if (result.length === 0) {
         return res.send("invalid mail id ");
       }
-
       const storedPassword = result[0].password;
       bcrypt.compare(providedPassword, storedPassword, (error, isMatch) => {
         if (error) {
           console.log(error);
         }
         if (isMatch) {
-          const user = { userName: userName, password: storedPassword };
+          const user = { id: result[0].id };
           const accessToken = generateAccessToken(user);
           const refreshToken = jwt.sign(
             user,
             process.env.REFRESH_TOKEN_SECRET,
-            { expiresIn: "15s" }
+            { expiresIn: "3600s" }
           );
           refreshTokens.push(refreshToken);
-          console.log("hey", refreshTokens);
           return res.json({
             accessToken: accessToken,
             refreshToken: refreshToken,
@@ -127,17 +103,82 @@ app.post("/token", (req, res) => {
     (error, result) => {
       console.log(result);
       const accessToken = generateAccessToken({
-        userName: result.userName,
-        password: result.password,
+        userId: result.id,
       });
-      res.send(accessToken);
+      res.send({ "new token": accessToken });
     }
   );
 });
 
 function generateAccessToken(user) {
-  return jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: "15s" });
+  return jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: "300s" });
 }
+
+app.get("/user/:id", authenticateToken, (req, res) => {
+  try {
+    const id = req.params.id;
+    const sql = `SELECT * FROM registration WHERE id= ${id}`;
+    connection.query(sql, (error, result) => {
+      if (error) {
+        return console.log(error);
+      }
+      if (result.length === 0) {
+        return res.send("no user exist");
+      }
+      return res.json(result);
+    });
+  } catch (error) {
+    console.log(error);
+  }
+});
+
+app.put("/user/:id", authenticateToken, (req, res) => {
+  try {
+    const id = req.params.id;
+    const sql = `SELECT * FROM registration WHERE id= ${id}`;
+    connection.query(sql, (error, result) => {
+      if (error) {
+        return console.log(error);
+      }
+      if (result.length === 0) {
+        return res.send("no user exist");
+      }
+      const sql = `UPDATE registration SET fname = "${req.body.fname}",lname = "${req.body.lname}" , phoneNumber = "${req.body.phoneNumber}" WHERE id=${id}`;
+      connection.query(sql, (error, result) => {
+        if (error) {
+          return console.log(error);
+        }
+      });
+      res.end("update details to registration table");
+    });
+  } catch (error) {
+    console.log(error);
+  }
+});
+
+app.delete("/user/:id", authenticateToken, (req, res) => {
+  try {
+    const id = req.params.id;
+    const sql = `SELECT * FROM registration WHERE id= ${id}`;
+    connection.query(sql, (error, result) => {
+      if (error) {
+        return console.log(error);
+      }
+      if (result.length === 0) {
+        return res.send("no user exist");
+      }
+      const sql = `DELETE FROM registration  WHERE id=${id}`;
+      connection.query(sql, (error, result) => {
+        if (error) {
+          return console.log(error);
+        }
+      });
+      res.end("delete details from registration table");
+    });
+  } catch (error) {
+    console.log(error);
+  }
+});
 
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
@@ -151,10 +192,10 @@ function authenticateToken(req, res, next) {
     if (error) {
       return res.end("invalid token");
     }
-    req.user = result;
     next();
   });
 }
+
 app.listen("3000", () => {
   console.log("server started on port 3000");
 });
